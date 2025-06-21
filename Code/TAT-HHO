@@ -1,0 +1,115 @@
+import os
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import (Input, Conv2D, MaxPooling2D, Concatenate, BatchNormalization, ReLU,
+                                     Conv2DTranspose)
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+from tensorflow.keras.optimizers import SGD
+from tensorflow.keras.losses import BinaryCrossentropy
+from tensorflow.keras.metrics import AUC, MeanIoU
+
+
+def conv_block(inputs, filters, block_name):
+    x1 = Conv2D(filters, (3, 3), padding='same', name=f'{block_name}_conv1')(inputs)
+    x2 = Conv2D(filters, (3, 3), padding='same', name=f'{block_name}_conv2')(inputs)
+    concat = Concatenate(name=f'{block_name}_concat')([x1, x2])
+    return concat
+
+
+def ima_block(inputs, filters, block_name):
+    scale1 = Conv2D(filters, (1, 1), padding='same', name=f'{block_name}_scale1')(inputs)
+    scale2 = Conv2D(filters, (3, 3), padding='same', name=f'{block_name}_scale2')(inputs)
+    scale3 = Conv2D(filters, (5, 5), padding='same', name=f'{block_name}_scale3')(inputs)
+    concat = Concatenate(name=f'{block_name}_concat')([scale1, scale2, scale3])
+    norm = BatchNormalization(name=f'{block_name}_bn')(concat)
+    relu = ReLU(name=f'{block_name}_relu')(norm)
+    return relu
+
+
+def t_block(inputs, filters, block_name):
+    x1 = Conv2D(filters, (3, 3), padding='same', name=f'{block_name}_conv1')(inputs)
+    x2 = Conv2D(filters, (3, 3), padding='same', name=f'{block_name}_conv2')(inputs)
+    concat = Concatenate(name=f'{block_name}_concat')([x1, x2])
+    norm = BatchNormalization(name=f'{block_name}_bn')(concat)
+    relu = ReLU(name=f'{block_name}_relu')(norm)
+    return relu
+
+
+def build_tat_tnet(input_shape=(128, 128, 1)):
+    inputs = Input(shape=input_shape, name='input_layer')
+
+    # Encoder Block 1
+    enc1 = conv_block(inputs, 64, 'encoder_block1')
+    ima1 = ima_block(enc1, 128, 'encoder_block1_IMA')
+    pool1 = MaxPooling2D((2, 2), name='pool1')(ima1)
+
+    # Encoder Block 2 (Encoder Block 4 in the architecture)
+    enc4 = conv_block(pool1, 512, 'encoder_block4')
+    ima4 = ima_block(enc4, 1024, 'encoder_block4_IMA')
+    pool4 = MaxPooling2D((2, 2), name='pool4')(ima4)
+
+    # Bottleneck
+    bottleneck = conv_block(pool4, 1024, 'bottleneck')
+    bottleneck_ima = ima_block(bottleneck, 2048, 'bottleneck_IMA')
+
+    # Decoder Block 1
+    up1 = Conv2DTranspose(512, (2, 2), strides=(2, 2), padding='same', name='decoder_block1_upconv')(bottleneck_ima)
+    concat1 = Concatenate(name='decoder_block1_concat')([up1, ima4])
+    dec1 = t_block(concat1, 512, 'decoder_block1_Tblock')
+
+    # Decoder Block 2 (Decoder Block 4)
+    up4 = Conv2DTranspose(64, (2, 2), strides=(2, 2), padding='same', name='decoder_block4_upconv')(dec1)
+    concat4 = Concatenate(name='decoder_block4_concat')([up4, ima1])
+    dec4 = t_block(concat4, 64, 'decoder_block4_Tblock')
+
+    # Output
+    outputs = Conv2D(1, (1, 1), activation='sigmoid', name='output')(dec4)
+
+    model = Model(inputs, outputs, name='Tri-Attribute-TNet')
+    return model
+
+
+# Training Utilities
+def compile_model(model):
+    optimizer = SGD(learning_rate=0.01, momentum=0.9, nesterov=True)
+    loss = BinaryCrossentropy()
+    metrics = ['accuracy', AUC(name='auc'), MeanIoU(num_classes=2, name='iou')]
+    model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+    return model
+
+
+def get_callbacks(model_path='tat_hho_best_model.h5'):
+    early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
+    checkpoint = ModelCheckpoint(model_path, monitor='val_loss', save_best_only=True)
+    return [early_stopping, reduce_lr, checkpoint]
+
+
+# Simulated Data (Replace with actual preprocessed data)
+# For demonstration purposes only
+X_train = np.random.rand(800, 128, 128, 1).astype(np.float32)
+Y_train = np.random.randint(0, 2, (800, 128, 128, 1)).astype(np.float32)
+X_val = np.random.rand(100, 128, 128, 1).astype(np.float32)
+Y_val = np.random.randint(0, 2, (100, 128, 128, 1)).astype(np.float32)
+
+# Build and compile model
+model = build_tat_tnet(input_shape=(128, 128, 1))
+model = compile_model(model)
+model.summary()
+
+# Callbacks
+callbacks = get_callbacks()
+
+# Train the model
+history = model.fit(
+    X_train, Y_train,
+    validation_data=(X_val, Y_val),
+    epochs=100,
+    batch_size=16,
+    callbacks=callbacks,
+    verbose=1
+)
+
+# Save final model
+model.save('final_tat_hho_model.h5')
