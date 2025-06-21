@@ -1,4 +1,25 @@
+# 📊 Dataset: Kvasir-SEG – Polyp Segmentation
 
+## 📁 Overview
+
+The **Kvasir-SEG** dataset is a publicly available, high-quality polyp segmentation dataset developed for machine learning research in gastrointestinal endoscopy. It contains 1000 images and their corresponding binary segmentation masks.
+
+- **Total Samples**: 1000
+- **Image Dimensions**: From 332×487 up to 1920×1072 pixels
+- **Image Format**: JPEG (`.jpg`)
+- **Mask Format**: Binary mask (`.jpg`, grayscale)
+- **Classes**: Binary — Polyp (foreground), Background
+
+## 🗂 Directory Structure
+
+Kvasir-SEG/
+├── images/
+│ ├── image_001.jpg
+│ ├── ...
+├── masks/
+│ ├── image_001.jpg
+│ ├── ...
+└── image_mask_mapping.csv
 - Each image has a corresponding mask file with the **same filename**.
 - The CSV file maps image-mask pairs used in preprocessing.
 
